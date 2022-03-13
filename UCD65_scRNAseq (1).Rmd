@@ -1,0 +1,116 @@
+---
+title: 'STEMREM205 Project: UCD65'
+author: "Abena Peasah, Hayley Raquer, David Seong, and Michelle Tai"
+date: "3/3/2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages}
+# Load required packages
+library(Seurat)
+library(dplyr)
+```
+# Import Data
+
+```{r data}
+# Load the UCD65 counts dataset and initialize Seurat object (https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE131007)
+data_path <- "/Users/michelletai/Documents/Stanford/Classes/STEMREM 205/Project/GSE131007_ucd65_count_matrix.tsv"
+ucd65_data <- read.csv(data_path, stringsAsFactors = FALSE, sep = "\t", header = TRUE, row.names = 1)
+ucd65 <- CreateSeuratObject(counts = ucd65_data, project = "ucd65", min.cells = 3, min.features = 200)
+```
+# Visualize QC metrics and fiter data
+
+```{r qc}
+# Filter data and visualize QC metrics
+# Calculate set of mitochondrial genes
+ucd65[["percent.mt"]] <- PercentageFeatureSet(ucd65, pattern = "^MT-")
+# Show QC metrics for the first 5 cells
+head(ucd65@meta.data, 5)
+# Visualize QC metrics as a violin plot
+VlnPlot(ucd65, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+plot0 <- FeatureScatter(ucd65, "nCount_RNA", "nFeature_RNA")
+plot0
+
+# Filter dataset using >200 genes per cell and <10% mitochondrial transcripts
+length(Cells(ucd65))
+ucd65 <- subset(ucd65, subset = nFeature_RNA > 200 & percent.mt < 10)
+length(Cells(ucd65))
+
+# Normalize expression data
+ucd65 <- NormalizeData(ucd65)
+
+# Identify variable genes
+ucd65 <- FindVariableFeatures(ucd65, selection.method = "vst", nfeatures = 2000)
+top10 <- head(VariableFeatures(ucd65), 10)
+top10
+plot1 <- VariableFeaturePlot(ucd65)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot2
+```
+
+# Pre-processing: scale data
+
+```{r scale}
+# Scale data for PCA: mean expression across cells is 0, variance across cells is 1
+all.genes <- rownames(ucd65)
+ucd65 <- ScaleData(ucd65, features = all.genes)
+length(Cells(ucd65))
+```
+
+# PCA
+
+```{r}
+set.seed(3)
+ucd65 <- RunPCA(ucd65, features = VariableFeatures(object = ucd65), verbose = FALSE)
+ElbowPlot(ucd65)
+```
+
+# Cluster
+
+```{r cluster}
+set.seed(3)
+ucd65 <- FindNeighbors(ucd65, dims = 1:14) # values from bootcamp 4
+set.seed(3)
+ucd65 <- FindClusters(ucd65, resolution = 0.18) # values from bootcamp 4
+```
+
+# UMAP (dimensionality reduction)
+
+```{r umap}
+set.seed(3)
+ucd65 <- RunUMAP(ucd65, dims = 1:14)
+DimPlot(ucd65, reduction = "umap")
+DimPlot(ucd65, reduction = "umap", group.by="orig.ident")
+```
+
+# Gene Expression Visualization
+
+```{r findmarkers}
+# find markers for every cluster compared to all remaining cells, report only the positive ones
+# https://satijalab.org/seurat/archive/v3.0/pbmc3k_tutorial.html
+ucd65.markers <- FindAllMarkers(ucd65, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+ucd65.markers.top2 <- ucd65.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_log2FC)
+ucd65.markers.top2
+```
+
+```{r heatmap}
+# https://satijalab.org/seurat/articles/visualization_vignette.html
+#DoHeatmap(ucd65, features = VariableFeatures(ucd65)[1:20], size = 4)
+#DoHeatmap(ucd65, features = VariableFeatures(ucd65)[1:20], group.by="orig.ident", size = 3, angle=20)
+DoHeatmap(ucd65, features = ucd65.markers.top2$gene, size = 4)
+DoHeatmap(ucd65, features = ucd65.markers.top2$gene, group.by="orig.ident", size = 3, angle=20)
+```
+
+```{r additional visualizations}
+# https://satijalab.org/seurat/articles/visualization_vignette.html
+# VlnPlot(ucd65, features = VariableFeatures(ucd65)[1:6])
+# VlnPlot(ucd65, features = VariableFeatures(ucd65)[1:6], group.by="orig.ident")
+VlnPlot(ucd65, features = ucd65.markers.top2$gene)
+VlnPlot(ucd65, features = ucd65.markers.top2$gene, group.by="orig.ident")
+```
